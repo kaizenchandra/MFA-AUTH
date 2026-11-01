@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import * as OTPAuth from "otpauth";
 import { PNG } from "pngjs";
 import jsQR from "jsqr";
@@ -24,8 +25,8 @@ async function register(page: Page, phone: string, email?: string) {
   await page.getByRole("button", { name: "Register", exact: true }).click();
 }
 async function terms(page: Page) {
-  if (await page.locator("#kc-accept").isVisible())
-    await page.locator("#kc-accept").click();
+  await expect(page.locator("#kc-accept")).toBeVisible();
+  await page.locator("#kc-accept").click();
 }
 async function verifyPhone(page: Page, phone: string) {
   await expect(
@@ -217,6 +218,12 @@ test("email registration and verification gate application access", async ({
   await expect(page).toHaveURL(/\/app$/);
   const me = await (await page.request.get("/api/v1/me")).json();
   expect(me.email).toBe(email);
+  const contractResponse=await page.request.get('/api/openapi');
+  expect(contractResponse.status()).toBe(200);
+  const contract=await contractResponse.json();
+  expect(contract.paths['/api/v1/me']).toBeTruthy();
+  expect(contract.components.securitySchemes.session.name).toBe('PLATFORM_SESSION');
+  if(process.env.EXPORT_OPENAPI==='1')writeFileSync('../docs/openapi.json',JSON.stringify(contract,null,2)+'\n');
   const csrf = await (await page.request.get("/api/v1/auth/csrf")).json();
   expect(
     (
@@ -324,4 +331,283 @@ test("OIDC starts with PKCE and rejects unsolicited callback state", async ({
   await page.goto("/login/oauth2/code/keycloak?code=invalid&state=attacker");
   await expect(page).toHaveURL(/error=authentication_failed/);
   expect((await page.request.get("/api/v1/me")).status()).toBe(401);
+});
+
+test("approved external ACR satisfies MFA without a redundant TOTP enrollment", async ({
+  page,
+}) => {
+  const suffix = Date.now().toString(),
+    alias = "org-trusted-" + suffix,
+    username = "trusted-" + suffix,
+    email = username + "@example.test";
+  const secret = randomBytes(32).toString("hex");
+  const tokenResponse = await page.request.post(
+    "http://localhost:18180/realms/master/protocol/openid-connect/token",
+    {
+      form: {
+        grant_type: "password",
+        client_id: "admin-cli",
+        username: "bootstrap",
+        password: env.KEYCLOAK_BOOTSTRAP_PASSWORD,
+      },
+    },
+  );
+  const { access_token } = await tokenResponse.json();
+  const headers = { Authorization: "Bearer " + access_token };
+  const client = await page.request.post(
+    "http://localhost:18180/admin/realms/company/clients",
+    {
+      headers,
+      data: {
+        clientId: alias,
+        secret,
+        enabled: true,
+        publicClient: false,
+        standardFlowEnabled: true,
+        directAccessGrantsEnabled: false,
+        redirectUris: [
+          "http://localhost:18180/realms/network/broker/" + alias + "/endpoint",
+        ],
+        attributes: {
+          "acr.loa.map": '{"urn:network:test:verified-mfa":1}',
+          "default.acr.values": "urn:network:test:verified-mfa",
+        },
+      },
+    },
+  );
+  expect(client.status()).toBe(201);
+  const provider = await page.request.post(
+    "http://localhost:18180/admin/realms/network/identity-provider/instances",
+    {
+      headers,
+      data: {
+        alias,
+        providerId: "oidc",
+        enabled: true,
+        trustEmail: false,
+        firstBrokerLoginFlowAlias: "first broker login",
+        postBrokerLoginFlowAlias: "network-post-broker",
+        config: {
+          clientId: alias,
+          clientSecret: secret,
+          issuer: "http://localhost:18180/realms/company",
+          authorizationUrl:
+            "http://localhost:18180/realms/company/protocol/openid-connect/auth",
+          tokenUrl:
+            "http://keycloak:8080/realms/company/protocol/openid-connect/token",
+          jwksUrl:
+            "http://keycloak:8080/realms/company/protocol/openid-connect/certs",
+          userInfoUrl:
+            "http://keycloak:8080/realms/company/protocol/openid-connect/userinfo",
+          validateSignature: "true",
+          useJwksUrl: "true",
+          defaultScope: "openid profile email",
+          pkceEnabled: "true",
+          pkceMethod: "S256",
+          passMaxAge: "true",
+          "network.trusted.acr": "urn:network:test:verified-mfa",
+        },
+      },
+    },
+  );
+  expect(provider.status()).toBe(201);
+  const org = "a1111111-1111-4111-8111-" + suffix.slice(-12).padStart(12, "0");
+  // Controlled test fixture. No identity/MFA credentials are written directly to Keycloak's DB.
+  const sql =
+    "INSERT INTO organization(id,slug,name) VALUES ('" +
+    org +
+    "','" +
+    alias +
+    "','Trusted assurance test'); INSERT INTO organization_security_policy(organization_id,sso_only,mfa_mode,jit_enabled) VALUES ('" +
+    org +
+    "',true,'TRUSTED_EXTERNAL',true); INSERT INTO organization_identity_provider(organization_id,alias,protocol,issuer,enabled,approved) VALUES ('" +
+    org +
+    "','" +
+    alias +
+    "','OIDC','http://localhost:18180/realms/company',true,true);";
+  execFileSync(
+    "docker",
+    [
+      "compose",
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "-U",
+      "platform",
+      "-d",
+      "platform",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      sql,
+    ],
+    { cwd: "..", stdio: "pipe" },
+  );
+  expect(
+    (
+      await page.request.post(
+        "http://localhost:18180/admin/realms/company/users",
+        {
+          headers,
+          data: {
+            username,
+            email,
+            firstName: "Trusted",
+            lastName: "Test",
+            enabled: true,
+            emailVerified: true,
+            credentials: [
+              { type: "password", value: password, temporary: false },
+            ],
+          },
+        },
+      )
+    ).status(),
+  ).toBe(201);
+  await page.goto("/");
+  await page.locator("#company").fill(alias);
+  await page.getByRole("button", { name: "Continue with Company SSO" }).click();
+  await page.locator("#username").fill(username);
+  await page.locator("#password").fill(password);
+  await page.locator("#kc-login").click();
+  await terms(page);
+  await verifyEmail(page, email);
+  await expect(page).toHaveURL(/\/app$/);
+  const me = await (await page.request.get("/api/v1/me")).json();
+  expect(me.mfa).toBe("external");
+  expect(
+    me.organizations.some((o: { id: string }) => o.id === org),
+  ).toBeTruthy();
+  expect(
+    (await page.request.get("/api/v1/organizations/" + org)).status(),
+  ).toBe(200);
+});
+
+test("invited registration, membership revocation and account disablement", async ({
+  page,
+  browser,
+}) => {
+  const suffix = Date.now(),
+    ownerEmail = "owner-" + suffix + "@example.test",
+    memberEmail = "member-" + suffix + "@example.test";
+  await register(page, ownerEmail, ownerEmail);
+  await terms(page);
+  await verifyEmail(page, ownerEmail);
+  await enroll(page);
+  await recovery(page);
+  await expect(page).toHaveURL(/\/app$/);
+  const csrf = await (await page.request.get("/api/v1/auth/csrf")).json();
+  const headers = { [csrf.headerName]: csrf.token };
+  const created = await page.request.post("/api/v1/organizations", {
+    headers,
+    data: { name: "Invitation journey", slug: "invited-" + suffix },
+  });
+  expect(created.ok()).toBeTruthy();
+  const org = await created.json();
+  const invited = await page.request.post(
+    "/api/v1/organizations/" + org.id + "/invitations",
+    { headers, data: { email: memberEmail, role: "MEMBER" } },
+  );
+  expect(invited.ok()).toBeTruthy();
+  const invitation = await invited.json();
+  const context = await browser.newContext();
+  const member = await context.newPage();
+  try {
+    await member.goto("http://localhost:18080" + invitation.acceptPath);
+    await member.getByRole("button", { name: "Register to accept" }).click();
+    await member.locator("#username").fill(memberEmail);
+    await member.locator("#email").fill(memberEmail);
+    await member.locator("#firstName").fill("Invited");
+    await member.locator("#lastName").fill("Colleague");
+    await member.locator("#password").fill(password);
+    await member.locator("#password-confirm").fill(password);
+    await member.getByRole("button", { name: "Register", exact: true }).click();
+    await terms(member);
+    await verifyEmail(member, memberEmail);
+    await enroll(member);
+    await recovery(member);
+    await expect(member).toHaveURL(/\/invite$/);
+    await member
+      .getByRole("button", { name: "Accept invitation", exact: true })
+      .click();
+    await expect(member).toHaveURL(/\/organizations$/);
+    const memberMe = await (
+      await member.request.get("http://localhost:18080/api/v1/me")
+    ).json();
+    expect(
+      memberMe.organizations.some((o: { id: string }) => o.id === org.id),
+    ).toBeTruthy();
+    expect(
+      (
+        await member.request.get(
+          "http://localhost:18080/api/v1/organizations/" +
+            org.id +
+            "/security-policy",
+        )
+      ).status(),
+    ).toBe(403);
+    const revoked = await page.request.put(
+      "/api/v1/organizations/" + org.id + "/members/" + memberMe.id,
+      { headers, data: { role: "MEMBER", status: "REVOKED", version: 0 } },
+    );
+    expect(revoked.ok()).toBeTruthy();
+    expect(
+      (
+        await member.request.get(
+          "http://localhost:18080/api/v1/organizations/" + org.id,
+        )
+      ).status(),
+    ).toBe(403);
+    const memberCsrf = await (
+      await member.request.get("http://localhost:18080/api/v1/auth/csrf")
+    ).json();
+    await member.request.post(
+      "http://localhost:18080/api/v1/invitations/accept",
+      {
+        headers: { [memberCsrf.headerName]: memberCsrf.token },
+        data: { token: invitation.token },
+      },
+    );
+    expect(
+      (
+        await member.request.get(
+          "http://localhost:18080/api/v1/organizations/" + org.id,
+        )
+      ).status(),
+    ).toBe(403);
+    const tokenResponse = await page.request.post(
+      "http://localhost:18180/realms/master/protocol/openid-connect/token",
+      {
+        form: {
+          grant_type: "password",
+          client_id: "admin-cli",
+          username: "bootstrap",
+          password: env.KEYCLOAK_BOOTSTRAP_PASSWORD,
+        },
+      },
+    );
+    const { access_token } = await tokenResponse.json();
+    const adminHeaders = { Authorization: "Bearer " + access_token };
+    const users = await (
+      await page.request.get(
+        "http://localhost:18180/admin/realms/network/users?email=" +
+          encodeURIComponent(memberEmail),
+        { headers: adminHeaders },
+      )
+    ).json();
+    expect(
+      (
+        await page.request.put(
+          "http://localhost:18180/admin/realms/network/users/" + users[0].id,
+          { headers: adminHeaders, data: { enabled: false } },
+        )
+      ).status(),
+    ).toBe(204);
+    expect(
+      (await member.request.get("http://localhost:18080/api/v1/me")).status(),
+    ).toBe(401);
+  } finally {
+    await context.close();
+  }
 });

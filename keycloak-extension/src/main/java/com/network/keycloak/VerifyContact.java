@@ -33,7 +33,9 @@ public final class VerifyContact implements RequiredActionProvider,RequiredActio
         render(c,null);
     }
     private void render(RequiredActionContext c,String error) {
-        var form=c.form().setAttribute("phone",phone(c.getUser())).setAttribute("sent",c.getAuthenticationSession().getAuthNote("phone_challenge")!=null);
+        String sentAt=c.getAuthenticationSession().getAuthNote("phone_sent_at");
+        long remaining=sentAt==null?0:Math.max(0,60-(System.currentTimeMillis()-Long.parseLong(sentAt))/1000);
+        var form=c.form().setAttribute("phone",phone(c.getUser())).setAttribute("sent",c.getAuthenticationSession().getAuthNote("phone_challenge")!=null).setAttribute("resendSeconds",remaining);
         if(error!=null) form.setError(error);
         c.challenge(form.createForm("verify-phone.ftl"));
     }
@@ -49,6 +51,7 @@ public final class VerifyContact implements RequiredActionProvider,RequiredActio
                 String old=c.getAuthenticationSession().getAuthNote("phone_challenge");
                 if(old!=null) c.getSession().singleUseObjects().remove(old);
                 c.getAuthenticationSession().setAuthNote("phone_challenge",issued.id());
+                c.getAuthenticationSession().setAuthNote("phone_sent_at",Long.toString(System.currentTimeMillis()));
                 render(c,null);
             } catch(IllegalArgumentException | IllegalStateException e) { render(c,e.getMessage()); }
             return;

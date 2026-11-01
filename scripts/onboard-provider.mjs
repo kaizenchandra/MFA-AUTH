@@ -12,7 +12,7 @@ if(spec.protocol==='OIDC'){
  for(const name of ['authorizationUrl','tokenUrl','jwksUrl'])https(spec[name]);
  if(spec.userInfoUrl)https(spec.userInfoUrl);
  const secret=process.env[spec.clientSecretEnv];if(!secret)throw new Error('Set the client secret environment variable named in the specification');
- config={issuer:spec.issuer,authorizationUrl:spec.authorizationUrl,tokenUrl:spec.tokenUrl,jwksUrl:spec.jwksUrl,clientId:spec.clientId,clientSecret:secret,validateSignature:'true',useJwksUrl:'true',pkceEnabled:'true',pkceMethod:'S256',defaultScope:'openid profile email',syncMode:'IMPORT',...(spec.userInfoUrl?{userInfoUrl:spec.userInfoUrl}:{})};
+ config={issuer:spec.issuer,authorizationUrl:spec.authorizationUrl,tokenUrl:spec.tokenUrl,jwksUrl:spec.jwksUrl,clientId:spec.clientId,clientSecret:secret,validateSignature:'true',useJwksUrl:'true',pkceEnabled:'true',pkceMethod:'S256',passMaxAge:'true',defaultScope:'openid profile email',syncMode:'IMPORT',...(spec.userInfoUrl?{userInfoUrl:spec.userInfoUrl}:{})};
  if(spec.trustedAcr){config['network.trusted.acr']=spec.trustedAcr;if(spec.tenantId)config['network.tenant.id']=spec.tenantId;}
 }else if(spec.protocol==='SAML'){
  https(spec.singleSignOnServiceUrl);

@@ -9,8 +9,10 @@
         <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" autofocus />
         <button type="submit" name="operation" value="verify">Verify mobile</button>
       </#if>
-      <button type="submit" name="operation" value="send" formnovalidate>Send verification code</button>
+      <button id="resend-code" data-seconds="${resendSeconds?c}" type="submit" name="operation" value="send" formnovalidate>Send verification code</button>
+      <p id="resend-countdown" role="status" aria-live="polite"></p>
       <p>You can request another code once every 60 seconds. Delivery is limited to ten messages per hour.</p>
     </form>
+    <script src="${url.resourcesPath}/js/phone.js" defer></script>
   </#if>
 </@layout.registrationLayout>
