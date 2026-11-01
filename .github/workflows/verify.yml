@@ -1,0 +1,24 @@
+name: Identity verification
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '21', cache: maven}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24.11.0', cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: mvn -B -ntp test
+      - run: npm ci && npm run build && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: node scripts/init-env.mjs
+      - run: docker compose up -d --build --wait
+      - run: docker compose exec -T postgres psql -U platform -d platform -v ON_ERROR_STOP=1 < scripts/seed-company.sql
+      - run: npm run test:e2e
+        working-directory: frontend
+      - if: always()
+        run: docker compose down

@@ -1,0 +1,120 @@
+name: network-identity
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Run node scripts/init-env.mjs}
+      POSTGRES_DB: platform
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4.6-alpine
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run init-env}
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  mailpit:
+    image: axllent/mailpit:v1.27.10
+    ports: ["127.0.0.1:18025:8025"]
+  sms-test:
+    image: node:24.11.0-alpine
+    command: [node, /app/sms-test.mjs]
+    environment:
+      SMS_TEST_TOKEN: ${SMS_TEST_TOKEN:?Run init-env}
+    volumes: ["./scripts/sms-test.mjs:/app/sms-test.mjs:ro"]
+    ports: ["127.0.0.1:8026:8026"]
+  keycloak:
+    build:
+      context: .
+      dockerfile: infra/keycloak/Dockerfile
+    command: [start, --optimized, --http-enabled=true]
+    environment:
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: platform
+      KC_DB_PASSWORD: ${DATABASE_PASSWORD}
+      KC_HOSTNAME: http://localhost:18180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: bootstrap
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_PASSWORD:?Run init-env}
+      PLATFORM_ENV: development
+      SMS_MODE: test
+      SMS_TEST_URL: http://sms-test:8026/messages
+      SMS_TEST_TOKEN: ${SMS_TEST_TOKEN}
+    ports: ["127.0.0.1:18180:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "bash -c 'exec 3<>/dev/tcp/localhost/9000; printf \"GET /health/ready HTTP/1.0\\r\\n\\r\\n\" >&3; cat <&3 | grep -q UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+  provision:
+    image: node:24.11.0-alpine
+    command: [node, /scripts/bootstrap.mjs]
+    volumes: ["./scripts:/scripts:ro"]
+    environment:
+      IDP_INTERNAL: http://keycloak:8080
+      IDP_PUBLIC: http://localhost:18180
+      APP_ORIGIN: http://localhost:18080
+      KEYCLOAK_BOOTSTRAP_PASSWORD: ${KEYCLOAK_BOOTSTRAP_PASSWORD}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      IDP_ADMIN_CLIENT_SECRET: ${IDP_ADMIN_CLIENT_SECRET}
+      TEST_BROKER_SECRET: ${TEST_BROKER_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+    depends_on:
+      keycloak: {condition: service_healthy}
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/platform
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      IDP_ISSUER: http://localhost:18180/realms/network
+      IDP_INTERNAL: http://keycloak:8080
+      APP_ORIGIN: http://localhost:18080
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      IDP_ADMIN_CLIENT_SECRET: ${IDP_ADMIN_CLIENT_SECRET}
+      COOKIE_SECURE: "false"
+    depends_on:
+      provision: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://localhost:9090/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+  frontend:
+    build:
+      context: frontend
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on:
+      backend: {condition: service_healthy}
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    profiles: [observability]
+    volumes: ["./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:9091:9090"]
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,18 @@
+images:
+  backend: registry.example.com/network/backend:REPLACE_WITH_IMMUTABLE_DIGEST
+  frontend: registry.example.com/network/frontend:REPLACE_WITH_IMMUTABLE_DIGEST
+  keycloak: registry.example.com/network/keycloak:REPLACE_WITH_IMMUTABLE_DIGEST
+appHost: network.example.com
+identityHost: identity.example.com
+tlsSecret: network-tls
+identityTlsSecret: identity-tls
+ingressClass: nginx
+existingSecret: network-secrets
+databaseUrl: jdbc:postgresql://REPLACE_RDS_HOST:5432/platform?sslmode=verify-full
+keycloakDatabaseUrl: jdbc:postgresql://REPLACE_RDS_HOST:5432/keycloak?sslmode=verify-full
+redisHost: REPLACE_ELASTICACHE_HOST
+replicas: 2
+externalSecrets:
+  enabled: false
+  store: aws-secrets-manager
+  remoteKey: network/production

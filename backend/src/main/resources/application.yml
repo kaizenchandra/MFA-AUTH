@@ -1,0 +1,59 @@
+server:
+  port: 8080
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      timeout: 15m
+      cookie:
+        name: PLATFORM_SESSION
+        http-only: true
+        secure: ${COOKIE_SECURE:true}
+        same-site: lax
+spring:
+  application.name: network-identity
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/platform}
+    username: ${DATABASE_USER:platform}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      connection-timeout: 3000
+      maximum-pool-size: 15
+  session:
+    store-type: redis
+    redis.namespace: network:sessions
+  data.redis:
+    host: ${REDIS_HOST:localhost}
+    password: ${REDIS_PASSWORD}
+    timeout: 2s
+    connect-timeout: 2s
+  security.oauth2.client:
+    registration.keycloak:
+      client-id: network-bff
+      client-secret: ${OIDC_CLIENT_SECRET}
+      authorization-grant-type: authorization_code
+      redirect-uri: ${APP_ORIGIN:http://localhost:8080}/login/oauth2/code/keycloak
+      scope: openid,profile,email
+    provider.keycloak:
+      issuer-uri: ${IDP_ISSUER:http://localhost:8180/realms/network}
+      authorization-uri: ${IDP_ISSUER:http://localhost:8180/realms/network}/protocol/openid-connect/auth
+      token-uri: ${IDP_INTERNAL:http://localhost:8180}/realms/network/protocol/openid-connect/token
+      jwk-set-uri: ${IDP_INTERNAL:http://localhost:8180}/realms/network/protocol/openid-connect/certs
+      user-info-uri: ${IDP_INTERNAL:http://localhost:8180}/realms/network/protocol/openid-connect/userinfo
+      user-name-attribute: sub
+platform:
+  origin: ${APP_ORIGIN:http://localhost:8080}
+  issuer: ${IDP_ISSUER:http://localhost:8180/realms/network}
+  idp-internal: ${IDP_INTERNAL:http://localhost:8180}
+  admin-secret: ${IDP_ADMIN_CLIENT_SECRET}
+  client-secret: ${OIDC_CLIENT_SECRET}
+management:
+  server.port: 9090
+  endpoints.web.exposure.include: health,info,prometheus
+  endpoint.health.probes.enabled: true
+  endpoint.health.show-details: never
+springdoc:
+  api-docs.path: /api/openapi
+  swagger-ui.enabled: false
+logging.level:
+  org.springframework.security: WARN
+  org.springframework.web: WARN

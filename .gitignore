@@ -1,0 +1,9 @@
+.env
+.env.*.local
+**/target/
+**/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+.runtime/
+.DS_Store

@@ -1,0 +1,16 @@
+<#import "template.ftl" as layout>
+<@layout.registrationLayout displayMessage=true; section>
+  <#if section = "header">Verify your mobile number
+  <#elseif section = "form">
+    <p>We will send a six-digit code to <strong>${phone!"your mobile"}</strong>. It expires in five minutes. Never share this code.</p>
+    <form action="${url.loginAction}" method="post">
+      <#if sent>
+        <label for="code">Verification code</label>
+        <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" autofocus />
+        <button type="submit" name="operation" value="verify">Verify mobile</button>
+      </#if>
+      <button type="submit" name="operation" value="send" formnovalidate>Send verification code</button>
+      <p>You can request another code once every 60 seconds. Delivery is limited to ten messages per hour.</p>
+    </form>
+  </#if>
+</@layout.registrationLayout>

@@ -1,0 +1,96 @@
+{{- range $name := list "backend" "frontend" "keycloak" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: {{ $.Values.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: {app: {{ $name }}}
+  template:
+    metadata:
+      labels: {app: {{ $name }}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: {{ $name }}
+          image: {{ index $.Values.images $name | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 1536Mi}
+          ports:
+            - {name: http, containerPort: 8080}
+            {{- if eq $name "backend" }}
+            - {name: management, containerPort: 9090}
+            {{- else if eq $name "keycloak" }}
+            - {name: management, containerPort: 9000}
+            - {name: cluster, containerPort: 7800}
+            {{- end }}
+          {{- if eq $name "backend" }}
+          envFrom:
+            - secretRef: {name: {{ $.Values.existingSecret }}}
+          env:
+            - {name: APP_ORIGIN, value: "https://{{ $.Values.appHost }}"}
+            - {name: IDP_ISSUER, value: "https://{{ $.Values.identityHost }}/realms/network"}
+            - {name: IDP_INTERNAL, value: "http://keycloak:8080"}
+            - {name: DATABASE_URL, value: {{ $.Values.databaseUrl | quote }}}
+            - {name: REDIS_HOST, value: {{ $.Values.redisHost | quote }}}
+            - {name: SPRING_DATA_REDIS_SSL_ENABLED, value: "true"}
+            - {name: COOKIE_SECURE, value: "true"}
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: management}
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: management}
+            initialDelaySeconds: 40
+          {{- else if eq $name "keycloak" }}
+          args: [start, --optimized, --http-enabled=true, --proxy-headers=xforwarded, --cache-stack=jdbc-ping]
+          envFrom:
+            - secretRef: {name: {{ $.Values.existingSecret }}}
+          env:
+            - {name: KC_HOSTNAME, value: "https://{{ $.Values.identityHost }}"}
+            - {name: KC_DB_URL, value: {{ $.Values.keycloakDatabaseUrl | quote }}}
+            - {name: KC_DB_USERNAME, value: keycloak}
+            - {name: PLATFORM_ENV, value: production}
+            - {name: SMS_MODE, value: twilio}
+          startupProbe:
+            httpGet: {path: /health/ready, port: management}
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /health/ready, port: management}
+          livenessProbe:
+            httpGet: {path: /health/live, port: management}
+          {{- else }}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+          livenessProbe:
+            httpGet: {path: /, port: http}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  selector: {app: {{ $name }}}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: {{ $name }}}
+{{- end }}

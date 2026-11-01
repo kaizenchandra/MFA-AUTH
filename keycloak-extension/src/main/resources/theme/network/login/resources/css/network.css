@@ -1,0 +1,4 @@
+:root { --pf-v5-global--primary-color--100: #146358; }
+.network-instructions { margin: 1rem 0; padding: 1rem; background: #edf7f4; border-radius: .5rem; color: #163831; }
+.network-instructions h2 { font-size: 1.1rem; font-weight: 700; margin: .5rem 0; }
+.network-instructions ol { padding-left: 1.5rem; }
