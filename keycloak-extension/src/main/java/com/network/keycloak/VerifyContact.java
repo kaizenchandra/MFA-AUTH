@@ -42,7 +42,11 @@ public final class VerifyContact implements RequiredActionProvider,RequiredActio
     public void processAction(RequiredActionContext c) {
         var data=c.getHttpRequest().getDecodedFormParameters();
         String phone=phone(c.getUser());
-        if(phone==null) { render(c,"Add an email or mobile number to your profile first"); return; }
+        if(phone==null) {
+            String supplied=data.getFirst("phone");
+            if(supplied==null || !supplied.matches("\\+[1-9][0-9]{7,14}")){render(c,"Enter a mobile number with its +country calling code");return;}
+            c.getUser().setSingleAttribute("phone",supplied);phone=supplied;
+        }
         var challenges=new PhoneChallenge(c.getSession().singleUseObjects());
         if("send".equals(data.getFirst("operation"))) {
             try {

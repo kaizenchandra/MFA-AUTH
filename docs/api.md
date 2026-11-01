@@ -1,12 +1,13 @@
 # API contracts
 
-The live OpenAPI 3 document is generated from Spring request/response DTOs at authenticated `GET /api/openapi`. Application endpoints are prefixed `/api/v1`. Mutations require the session-bound token from `GET /auth/csrf` in the returned header name (normally X-CSRF-TOKEN). Credentials, TOTP and delivery codes never pass through these APIs.
+The live OpenAPI 3 document is generated from Spring request/response DTOs at authenticated `GET /api/openapi`; the verified export is [openapi.json](openapi.json). Application endpoints are prefixed `/api/v1`. Mutations require the session-bound token from `GET /auth/csrf` in the returned header name (normally X-CSRF-TOKEN). Credentials, TOTP and delivery codes never pass through these APIs.
 
 | Route | Authorization / contract |
 |---|---|
 | GET /auth/csrf | Anonymous allowed; creates CSRF/session context; returns token, headerName |
 | GET /auth/providers | Anonymous allowed; login/registration initiation links |
 | POST /auth/sso/discovery | CSRF; {identifier}; 20 requests/minute/source; returns authorizationUrl for an approved provider |
+| POST /auth/invitations/prepare | CSRF; {token}; stores only its hash in the session across registration/sign-in; 10/minute/source |
 | GET /me | Fully authenticated, verified contact and MFA; minimal profile and memberships |
 | POST /auth/logout-current | Revokes current Keycloak session and invalidates BFF session |
 | POST /auth/logout-all | Recent authentication; revokes every identity session |

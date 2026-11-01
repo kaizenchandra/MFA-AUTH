@@ -2,7 +2,7 @@
 
 ## Versions
 
-Java 21; Spring Boot 3.5.7 (its managed Spring Security/Redis/JDBC/Testcontainers dependency set); Keycloak 26.4.7; PostgreSQL 17.6; Redis 7.4.6; React 19.2.0; TypeScript 5.9.3; Vite 7.1.12; Playwright 1.56.1. Frontend transitive versions are locked. Container image tags are pinned; production releases must additionally pin reviewed digests and produce an SBOM. Internal Keycloak SPIs require upgrade testing.
+Java 21; Spring Boot 3.5.7 (its managed Spring Security/Redis/JDBC/Testcontainers dependency set); Keycloak 26.4.7; PostgreSQL 17.6; Redis 7.4.6; React 19.2.0; React Router 7.18.5; TypeScript 5.9.3; Vite 7.1.12; Playwright 1.56.1. Frontend transitive versions are locked. Container image tags are pinned; production releases must additionally pin reviewed digests and produce an SBOM. Internal Keycloak SPIs require upgrade testing.
 
 ## Environments and secrets
 
@@ -49,7 +49,7 @@ Provision the realm once with the deployment's actual origins and production SMT
 
 Application HTTP metrics use Micrometer and Actuator; liveness/readiness run on a separate management port. Keycloak metrics/health are built into its dedicated management port. The optional Compose Prometheus profile scrapes Keycloak. Application Prometheus access requires protected monitoring authorization; it is not exposed anonymously through the application ingress. Integrate your platform's authenticated metrics collector or a management-port-only security chain before enabling scraping.
 
-Every BFF request receives a generated correlation ID. Application mutations write bounded, secret-free audit records; identity events and administrator events are retained by Keycloak with admin request bodies disabled. No passwords, OTPs, recovery codes, QR secrets, cookies, bearer tokens or request bodies belong in traces/logs. Reverse proxies must redact authorization callback query strings (which contain authorization codes) before production access-log collection. Configure structured log transport, an OpenTelemetry collector and a Grafana dashboard through the deployment's existing observability platform; this repository does not provision those cloud services.
+Every BFF request receives a generated correlation ID. Application mutations write bounded, secret-free audit records; identity events and administrator events are retained by Keycloak with admin request bodies disabled. No passwords, OTPs, recovery codes, QR secrets, cookies, bearer tokens or request bodies belong in traces/logs. The supplied Nginx access log records the path without query strings; preserve this at upstream proxies too. Configure structured log transport, an OpenTelemetry collector and a Grafana dashboard through the deployment's existing observability platform; this repository does not provision those cloud services.
 
 Alert on elevated authentication failures, throttling, sustained IdP/Redis/database errors, identity readiness failures, unauthorized organization access, unusual MFA resets and privileged provider/policy changes. Monitor SMTP/SMS failures and NTP drift. Audit stores need access restrictions, retention policy and immutable downstream archival; the application table alone is not tamper-proof against database administrators.
 

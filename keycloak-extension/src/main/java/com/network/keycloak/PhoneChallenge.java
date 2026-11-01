@@ -17,6 +17,7 @@ final class PhoneChallenge {
         String key="network:sms:"+hash(phone);
         if(!store.putIfAbsent(key+":cooldown",60)) throw new IllegalStateException("Wait 60 seconds before sending again");
         String hour=Long.toString(System.currentTimeMillis()/3600000);
+        if(!reserve("network:sms-user:"+subject+":"+hour,10,3600)) throw new IllegalStateException("Delivery limit reached. Try again later");
         if(!reserve(key+":"+hour,10,3600)) throw new IllegalStateException("Delivery limit reached. Try again later");
         String id=UUID.randomUUID().toString(),salt=UUID.randomUUID().toString(),code=String.format(Locale.ROOT,"%06d",RANDOM.nextInt(1000000));
         store.put(id,TTL,Map.of("hash",hash(salt+code),"salt",salt,"subject",subject,"phone",phone));

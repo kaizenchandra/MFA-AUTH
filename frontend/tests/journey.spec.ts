@@ -333,6 +333,29 @@ test("OIDC starts with PKCE and rejects unsolicited callback state", async ({
   expect((await page.request.get("/api/v1/me")).status()).toBe(401);
 });
 
+test('signed SAML broker performs MFA fallback and organization authorization',async({page})=>{
+ const suffix=Date.now().toString(),alias='org-saml-'+suffix,username='saml-'+suffix,email=username+'@example.test';
+ const tokenResponse=await page.request.post('http://localhost:18180/realms/master/protocol/openid-connect/token',{form:{grant_type:'password',client_id:'admin-cli',username:'bootstrap',password:env.KEYCLOAK_BOOTSTRAP_PASSWORD}});const {access_token}=await tokenResponse.json();const headers={Authorization:'Bearer '+access_token};
+ const networkKeys=await (await page.request.get('http://localhost:18180/admin/realms/network/keys',{headers})).json();
+ const companyKeys=await (await page.request.get('http://localhost:18180/admin/realms/company/keys',{headers})).json();
+ const certificate=(keys:{keys:{status:string;algorithm:string;certificate:string}[]})=>keys.keys.find(k=>k.status==='ACTIVE'&&k.algorithm==='RS256')!.certificate;
+ const entity='https://network.test/broker/'+alias;
+ const client=await page.request.post('http://localhost:18180/admin/realms/company/clients',{headers,data:{clientId:entity,protocol:'saml',enabled:true,redirectUris:['http://localhost:18180/realms/network/broker/'+alias+'/endpoint'],attributes:{'saml.assertion.signature':'true','saml.server.signature':'true','saml.client.signature':'true','saml.signing.certificate':certificate(networkKeys),'saml.signature.algorithm':'RSA_SHA256','saml.force.post.binding':'true','saml_name_id_format':'persistent'},protocolMappers:['email','firstName','lastName'].map(name=>({name,protocol:'saml',protocolMapper:'saml-user-property-mapper',config:{'user.attribute':name,'attribute.name':name,'attribute.nameformat':'Basic'}}))}});expect(client.status()).toBe(201);
+ const provider=await page.request.post('http://localhost:18180/admin/realms/network/identity-provider/instances',{headers,data:{alias,providerId:'saml',enabled:true,trustEmail:false,firstBrokerLoginFlowAlias:'first broker login',postBrokerLoginFlowAlias:'network-post-broker',config:{entityId:entity,idpEntityId:'http://localhost:18180/realms/company',singleSignOnServiceUrl:'http://localhost:18180/realms/company/protocol/saml',validateSignature:'true',wantAssertionsSigned:'true',wantAuthnRequestsSigned:'true',postBindingResponse:'true',postBindingAuthnRequest:'true',signingCertificate:certificate(companyKeys),signatureAlgorithm:'RSA_SHA256',nameIDPolicyFormat:'urn:oasis:names:tc:SAML:2.0:nameid-format:persistent',emailAttribute:'email',firstNameAttribute:'firstName',lastNameAttribute:'lastName',syncMode:'IMPORT'}}});expect(provider.status()).toBe(201);
+ const org='b2222222-2222-4222-8222-'+suffix.slice(-12).padStart(12,'0');
+ const sql="INSERT INTO organization(id,slug,name) VALUES ('"+org+"','"+alias+"','SAML test'); INSERT INTO organization_security_policy(organization_id,sso_only,mfa_mode,jit_enabled) VALUES ('"+org+"',true,'MANDATORY',true); INSERT INTO organization_identity_provider(organization_id,alias,protocol,issuer,enabled,approved) VALUES ('"+org+"','"+alias+"','SAML','http://localhost:18180/realms/company',true,true);";
+ execFileSync('docker',['compose','exec','-T','postgres','psql','-U','platform','-d','platform','-v','ON_ERROR_STOP=1','-c',sql],{cwd:'..',stdio:'pipe'});
+ expect((await page.request.post('http://localhost:18180/admin/realms/company/users',{headers,data:{username,email,firstName:'Saml',lastName:'Test',enabled:true,emailVerified:true,credentials:[{type:'password',value:password,temporary:false}]}})).status()).toBe(201);
+ await page.goto('/');await page.locator('#company').fill(alias);await page.getByRole('button',{name:'Continue with Company SSO'}).click();await page.locator('#username').fill(username);await page.locator('#password').fill(password);await page.locator('#kc-login').click();
+ await expect(page.locator('#kc-accept').or(page.locator('#email'))).toBeVisible();
+ if(await page.locator('#email').isVisible()){
+   await page.locator('#email').fill(email);await page.locator('#firstName').fill('Saml');await page.locator('#lastName').fill('Test');
+   await page.locator('input[type=submit],button[type=submit]').first().click();
+ }
+ await terms(page);await verifyEmail(page,email);await enroll(page);await recovery(page);await expect(page).toHaveURL(/\/app$/);
+ const me=await (await page.request.get('/api/v1/me')).json();expect(me.mfa).toBe('local');expect(me.organizations.some((o:{id:string})=>o.id===org)).toBeTruthy();expect((await page.request.get('/api/v1/organizations/'+org)).status()).toBe(200);
+});
+
 test("approved external ACR satisfies MFA without a redundant TOTP enrollment", async ({
   page,
 }) => {

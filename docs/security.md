@@ -34,7 +34,7 @@ Registration error wording is generic, but complete timing-indistinguishability 
 
 ## Browser, session and tenant controls
 
-HttpOnly SameSite=Lax cookies, Secure in production; same-origin BFF; CSRF tokens for all mutations; exact OIDC redirects; PKCE; no implicit/password grant for application clients; no open application redirects; no bearer token query parameters or localStorage. The frontend never determines authorization.
+HttpOnly SameSite=Lax cookies, Secure in production; same-origin BFF; CSRF tokens for all mutations; exact OIDC redirects; PKCE; no implicit/password grant for application clients; no open application redirects; no bearer token query parameters or localStorage. The frontend never determines authorization. Return destinations are restricted to four application routes. Keycloak's native basic scope supplies the authoritative authentication time; the BFF requests max_age and uses that claim for recent-authentication checks.
 
 Redis stores serialized server-side sessions and tokens. Require network isolation, authentication, TLS, at-rest encryption, restricted backups and trusted writers. Redis loss invalidates application sessions. BFF identity introspection is uncached, so Keycloak revocation is checked on the next API request, subject to the identity cluster's own consistency.
 

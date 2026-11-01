@@ -4,6 +4,11 @@
   <#elseif section = "form">
     <p>We will send a six-digit code to <strong>${phone!"your mobile"}</strong>. It expires in five minutes. Never share this code.</p>
     <form action="${url.loginAction}" method="post">
+      <#if !phone??>
+        <p>Your identity provider did not supply an email or mobile contact. Add a mobile number to verify your account.</p>
+        <label for="phone">Mobile number including country calling code</label>
+        <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+14155550123" pattern="\+[1-9][0-9]{7,14}" required />
+      </#if>
       <#if sent>
         <label for="code">Verification code</label>
         <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" autofocus />
